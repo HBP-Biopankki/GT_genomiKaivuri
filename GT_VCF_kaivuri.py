@@ -10,12 +10,32 @@ import os
 from io import StringIO
 from datetime import datetime
 
-#Kansio missa raaka-data on. 
-vcf_path = r'O:\Raw_genotypes\DF4'
+def config(): 
+    '''perus konfiguraatio palikka. Argumentit optionaaleja. 
+    --inPath == Missa raaka-data sijaitsee. 
+    --outPath == minne tulos-data haluataan.  
+    --locations == file jossa kromosomi, paikka combot TBA'''
+    import argparse
+    global args
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--inPath", required = False, default = r'O:\Raw_genotypes\DF4') #Kansio missa raaka-data on. 
+    parser.add_argument("--outPath", required = False, default = None)
+    parser.add_argument("--locations", required = False, default = None)
+    parser.add_argument("--VCF_file_type", required = False, default = None)
+    parser.add_argument("--tee_vali_saveja", required = False, default = False, choices={True, False})
+    args = parser.parse_args()
+
+    #tarkistus etta input path on olemassa
+    if not os.path.exists(args.inPath): 
+        print('Input-pathi ei ole olemassa', args.inPath)
+    #Defaulta pathi
+    if args.outPath is None:
+        args.outPath = os.path.join(args.inPath, 'tmp_folder')
+
 
 def main(): 
-    
-    ###Input metodi TBA
+    ###Input metodi TBA os.path.isfie(args.locations)
     user_input = '''\
 CR,pos
 13,32330992
@@ -72,36 +92,26 @@ CR,pos
 17,43095919'''
     
     user_input_DF = pd.read_csv(StringIO(user_input), sep=',')
-    user_input_DF
-    
-    user_input_DF.columns
-    user_kromosomit = list(set(user_input_DF['CR'].to_list())) #Dev flag: pitaa hakea tupleina 
-    user_paikat     = list(set(user_input_DF['pos'].to_list()))
+
+    user_kromosomit = list(set(user_input_DF['CR'].tolist())) #Dev flag: pitaa hakea tupleina 
+    user_paikat     = list(set(user_input_DF['pos'].tolist()))
     
     user_kromosomit = [bytes(str(i),'utf-8') for i in user_kromosomit]
-    
-    
-    ###  Config
-    VCF_file_type = None
-    # vcf_path = vcf_path # koodin alussa. 
-    temp_path = os.path.join(vcf_path, 'tmp_folder')
-    
+  
     ### tmp_folderi
-    if os.path.exists(temp_path): 
-        print('Temp folder on olemassa: ', temp_path)
+    if os.path.exists(args.outPath): 
+        print('Temp folder on olemassa: ', args.outPath)
         # os._exit(1)
     else: 
-        os.mkdir(temp_path)
-        
-        
+        os.mkdir(args.outPath)
     
     ### Tiedostot
-    all_files = pd.DataFrame(os.listdir(vcf_path), columns=['file_nimi'])
+    all_files = pd.DataFrame(os.listdir(args.inPath), columns=['file_nimi'])
     if all_files['file_nimi'].str.contains('vcf.gz').any(): 
-        VCF_file_type = 'vcf.gz'
-        all_files = all_files[all_files['file_nimi'].str.contains('vcf.gz')]
+        args.VCF_file_type = 'vcf.gz'
+        all_files = all_files[all_files['file_nimi'].str.contains('vcf.gz', regex=False)]
     elif all_files['file_nimi'].str.contains('vcf').any(): 
-        VCF_file_type = 'vcf'
+        args.VCF_file_type = 'vcf'
         all_files = all_files[all_files['file_nimi'].str.contains('vcf')]
     else: 
         print('VCF tieostojen tunnistuksessa virhe.')
@@ -109,15 +119,12 @@ CR,pos
         exit() #
     
     
-    
-    
-    
     ###Suurempi .vcf.gz prosssointi
     for index, read_file in enumerate(all_files['file_nimi']):     
         print('Working on file ', read_file)
-        output = gzip.open(os.path.join(temp_path, 'small_'+read_file) , 'wb') 
+        output = gzip.open(os.path.join(args.outPath, 'small_'+read_file) , 'wb') 
     
-        with gzip.open(os.path.join(vcf_path, read_file), 'rb') as f:
+        with gzip.open(os.path.join(args.inPath, read_file), 'rb') as f:
             for idx, line in enumerate(f):
                 if line[:1] == b'#': 
                     output.write(line)
@@ -137,7 +144,10 @@ CR,pos
     ###Yhdistetaan kaikkki filet. 
     def get_header(tiedosto):
         vcf_header = []
-        with gzip.open(os.path.join(temp_path, tiedosto), "rt") as file_open:
+        if not os.path.isfile(os.path.join(args.outPath, tiedosto) ): 
+            print('error in gettting the header. File pointer fulty')
+
+        with gzip.open(os.path.join(args.outPath, tiedosto), "rt") as file_open:
               for line in file_open:
                 if line.startswith("#CHROM"):
                       vcf_header = [x for x in line.split('\t')]
@@ -145,25 +155,24 @@ CR,pos
         file_open.close()
         return vcf_header
     
-    
     yhteiset = ['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT']
     master_tulos = pd.DataFrame(columns= yhteiset )
-    small_files = pd.DataFrame(os.listdir(temp_path), columns=['file_nimi'])
+    small_files = pd.DataFrame(os.listdir(args.outPath), columns=['file_nimi'])
+    small_files = small_files[small_files['file_nimi'].str.endswith(args.VCF_file_type)]
     
-    for file in small_files['file_nimi']: 
-        print(file)
+   for file in small_files['file_nimi']: 
+        # print(file)
         header = get_header(file)
         # print(header)
         try: #quick and dirty... 
-            tmp_data = pd.read_csv(os.path.join(temp_path, file), comment='#', sep='\t', compression='gzip', header=None, names=header)
+            tmp_data = pd.read_csv(os.path.join(args.outPath, file), comment='#', sep='\t', compression='gzip', header=None, names=header)
             
             # Etsitaan yhteiset columnit
-            common = list(set(master_tulos.columns.to_list()).intersection(header) )
+            common = list(set(master_tulos.columns.tolist()).intersection(header) )
             master_tulos = pd.merge(master_tulos, tmp_data, how = 'outer', on = common) 
         except Exception: 
             print(Exception)
             pass
-    
     
     ###Siivotaan 0/0 tai NaN pois... 
     poistoArvot = [np.nan, '0/0'] #
@@ -173,16 +182,15 @@ CR,pos
             if all([i in poistoArvot  for i in master_tulos[column].unique().tolist()]): 
                 poistoon.append(column)
 
-    
     master_tulos = master_tulos.drop(columns = poistoon)
         
     ###Talletetaan 
-    def talletus():
-        master_tulos.to_csv(os.path.join(temp_path, 'master.csv'), index=False)
+    if args.tee_vali_saveja: 
+        master_tulos.to_csv(os.path.join(args.outPath, 'master.csv'), index=False)
     def load_prior(): 
-        master_tulos = pd.read_csv(os.path.join(temp_path, 'master.csv'))
+        master_tulos = pd.read_csv(os.path.join(args.outPath, 'master.csv'))
         return master_tulos 
-    
+    # master_tulos = load_prior()
     
     ###frekvenssit    
     
@@ -198,16 +206,14 @@ CR,pos
     foo = freqs.reset_index()
     bar = foo['index'].str.split('^', expand=True).rename(columns={0: 'Ax_code', 1:'filter'})
     out = pd.merge(bar,foo , how='inner', left_index=True, right_index=True).sort_values(['Ax_code','filter'])
-    freqs.to_csv(os.path.join(temp_path, 'frekvenssit.csv'))
     
-    out.to_csv(os.path.join(temp_path, 'frekvenssit.csv'), index=False)
+    out.to_csv(os.path.join(args.outPath, 'frekvenssit.csv'), index=False)
 
 
     ### Hienompi haku. 
-    
     samalla_koodilla = pd.merge(user_input_DF,master_tulos,  how='inner', right_on =['#CHROM','POS' ], left_on = ['CR', 'pos'] ).drop_duplicates().sort_values(['CR', 'pos'])
     
-    #Puuttuvat
+    #Puuttuvat positiolla 'off by one' 
     outer_join = user_input_DF.merge(samalla_koodilla, how = 'outer', indicator = True)
     puuttuvat = outer_join[~(outer_join._merge == 'both')].drop('_merge', axis = 1)[['CR', 'pos']]
     slave = master_tulos[~master_tulos['ID'].isin(samalla_koodilla['ID'])]
@@ -217,17 +223,16 @@ CR,pos
 
     #Kirjoitetaan CSV datana: 
     valmis = samalla_koodilla.append(plus_1.drop(columns=['POS_plus_1'] )) 
-    valmis.to_csv(os.path.join(temp_path, 'Finaalit.csv'), index=False)
+    valmis.to_csv(os.path.join(args.outPath, 'Finaalit.csv'), index=False)
 
     ###Kirjoitetaan VCF datana: 
     vcf_header = get_vcf_header()
 
     valmis.columns = valmis.columns.str.replace('\n', '')
     valmis = valmis.drop(columns=['CR', 'pos'])
-    with open(os.path.join(temp_path, 'test_VCF.vcf'), 'w') as vcf:
+    with open(os.path.join(args.outPath, 'Finaalit.vcf'), 'w') as vcf:
         vcf.write(vcf_header)
-    valmis.to_csv(os.path.join(temp_path, 'Finaalit.vcf'), sep="\t", header=True, mode='a', index=False)
-
+    valmis.to_csv(os.path.join(args.outPath, 'Finaalit.vcf'), sep="\t", header=True, mode='a', index=False)
 
 
 def get_vcf_header() -> str:
@@ -277,7 +282,6 @@ def get_vcf_header() -> str:
 ##contig=<ID=X,species="Homo sapiens">
 ##contig=<ID=Y,species="Homo sapiens">
 """
-
 ########################################################################
 ########################################################################
 def dev_stuff(): 
@@ -287,19 +291,11 @@ def dev_stuff():
         chip_mk2 = pd.read_csv(r'C:\Downloads\Axiom_stuff\Axiom_Finngen2.na36.r4.a2.annot.csv', sep=';')
         chip_mk1 = pd.read_csv(r'C:\Downloads\Axiom_stuff/finngen1_variants_rsid.txt', sep='\t')
         return chip_mk2, chip_mk1
-    
-    def foo(): 
-        kohde = 'C:\Downloads\Axiom_stuff\Axiom_Finngen2.na36.r4.a2.annot.csv'
-        my_data = pd.read_csv(kohde,skiprows = 20, sep=',' )
-        my_data.columns
-
-    
-    def crete_config()-> None: 
-        pass
-    
-    def main_options(): #?
-        pass
+   
+########################################################################
+########################################################################    
 
 if __name__ == '__main__': 
+    config()
     main()
     
