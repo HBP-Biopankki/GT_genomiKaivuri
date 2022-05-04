@@ -175,7 +175,8 @@ CR,pos
             pass
     
     ###Siivotaan 0/0 tai NaN pois... 
-    poistoArvot = [np.nan, '0/0'] #
+    #poistoArvot = [np.nan, '0/0'] #
+    poistoArvot = [] #HALUTTIIN ETTA EI POISTETA MITAAN
     poistoon = []
     for column in master_tulos.columns: 
         if column not in yhteiset:
@@ -195,8 +196,8 @@ CR,pos
     ###frekvenssit    
     
     tmp = master_tulos.T
-    tmp.columns = tmp.iloc[2] +'^'+ tmp.iloc[6] 
-    tmp= tmp.iloc[9:]
+    tmp.columns = tmp.iloc[master_tulos.columns.get_loc('ID')] +'^'+ tmp.iloc[master_tulos.columns.get_loc('FILTER')] 
+    tmp = tmp[~tmp.index.isin(['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT'])]
 
     freqs = pd.DataFrame()
     for col in tmp.columns: 
