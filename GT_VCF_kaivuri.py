@@ -9,21 +9,22 @@ import gzip
 import os
 from io import StringIO
 from datetime import datetime
+import argparse
 
 def config(): 
     '''perus konfiguraatio palikka. Argumentit optionaaleja. 
     --inPath == Missa raaka-data sijaitsee. 
     --outPath == minne tulos-data haluataan.  
     --locations == file jossa kromosomi, paikka combot TBA'''
-    import argparse
-    global args
 
+    global args
     parser = argparse.ArgumentParser()
     parser.add_argument("--inPath", required = False, default = r'O:\Raw_genotypes\DF4') #Kansio missa raaka-data on. 
     parser.add_argument("--outPath", required = False, default = None)
     parser.add_argument("--locations", required = False, default = None)
     parser.add_argument("--VCF_file_type", required = False, default = None)
     parser.add_argument("--tee_vali_saveja", required = False, default = False, choices={True, False})
+    parser.add_argument("--drop_axiom_bp", required = False, default = False, choices={True, False})
     args = parser.parse_args()
 
     #tarkistus etta input path on olemassa
@@ -32,7 +33,7 @@ def config():
     #Defaulta pathi
     if args.outPath is None:
         args.outPath = os.path.join(args.inPath, 'tmp_folder')
-
+config()
 
 def main(): 
     ###Input metodi TBA os.path.isfie(args.locations)
@@ -94,32 +95,31 @@ CR,pos
     user_input_DF = pd.read_csv(StringIO(user_input), sep=',')
 
     user_kromosomit = list(set(user_input_DF['CR'].tolist())) #Dev flag: pitaa hakea tupleina 
-    user_paikat     = list(set(user_input_DF['pos'].tolist()))
+    user_paikat = list(set(user_input_DF['pos'].tolist()))
     
     user_kromosomit = [bytes(str(i),'utf-8') for i in user_kromosomit]
   
-    ### tmp_folderi
+    ### Output_folderi ###
     if os.path.exists(args.outPath): 
         print('Temp folder on olemassa: ', args.outPath)
         # os._exit(1)
     else: 
         os.mkdir(args.outPath)
     
-    ### Tiedostot
+    ### Tiedostot ###
     all_files = pd.DataFrame(os.listdir(args.inPath), columns=['file_nimi'])
     if all_files['file_nimi'].str.contains('vcf.gz').any(): 
         args.VCF_file_type = 'vcf.gz'
         all_files = all_files[all_files['file_nimi'].str.contains('vcf.gz', regex=False)]
     elif all_files['file_nimi'].str.contains('vcf').any(): 
         args.VCF_file_type = 'vcf'
-        all_files = all_files[all_files['file_nimi'].str.contains('vcf')]
+        all_files = all_files[all_files['file_nimi'].str.couser_paikatntains('vcf')]
     else: 
         print('VCF tieostojen tunnistuksessa virhe.')
         sleep(5)
         exit() #
     
-    
-    ###Suurempi .vcf.gz prosssointi
+    ### Suurempi .vcf.gz prosssointi ###
     for index, read_file in enumerate(all_files['file_nimi']):     
         print('Working on file ', read_file)
         output = gzip.open(os.path.join(args.outPath, 'small_'+read_file) , 'wb') 
@@ -135,17 +135,18 @@ CR,pos
                             # print('match')
                             output.write(line)
             output.close()
-                        
-    ###Suurempi .vcf prosssointi    TBA , ehka
+                            
+    ###Suurempi .vcf prosssointi    TBA , ehka ###
     ###
     ###
     ###
-                    
-    ###Yhdistetaan kaikkki filet. 
+    ### cleanup ###            
+    del all_files, user_input, user_kromosomit,  user_paikat
+    ### Yhdistetaan kaikkki filet ###
     def get_header(tiedosto):
         vcf_header = []
         if not os.path.isfile(os.path.join(args.outPath, tiedosto) ): 
-            print('error in gettting the header. File pointer fulty')
+            print('error in gettting the header. File pointer faulty')
 
         with gzip.open(os.path.join(args.outPath, tiedosto), "rt") as file_open:
               for line in file_open:
@@ -159,11 +160,10 @@ CR,pos
     master_tulos = pd.DataFrame(columns= yhteiset )
     small_files = pd.DataFrame(os.listdir(args.outPath), columns=['file_nimi'])
     small_files = small_files[small_files['file_nimi'].str.endswith(args.VCF_file_type)]
-    
-   for file in small_files['file_nimi']: 
-        # print(file)
+
+    for file in small_files['file_nimi']: 
         header = get_header(file)
-        # print(header)
+
         try: #quick and dirty... 
             tmp_data = pd.read_csv(os.path.join(args.outPath, file), comment='#', sep='\t', compression='gzip', header=None, names=header)
             
@@ -172,11 +172,10 @@ CR,pos
             master_tulos = pd.merge(master_tulos, tmp_data, how = 'outer', on = common) 
         except Exception: 
             print(Exception)
-            pass
-    
-    ###Siivotaan 0/0 tai NaN pois... 
-    #poistoArvot = [np.nan, '0/0'] #
-    poistoArvot = [] #HALUTTIIN ETTA EI POISTETA MITAAN
+ 
+    ### Siivotaan 0/0 tai NaN pois...  ###
+    poistoArvot = [np.nan, '0/0'] #
+    poistoArvot = [] #
     poistoon = []
     for column in master_tulos.columns: 
         if column not in yhteiset:
@@ -184,17 +183,32 @@ CR,pos
                 poistoon.append(column)
 
     master_tulos = master_tulos.drop(columns = poistoon)
-        
-    ###Talletetaan 
+
+    ### Talletetaan ###
     if args.tee_vali_saveja: 
         master_tulos.to_csv(os.path.join(args.outPath, 'master.csv'), index=False)
     def load_prior(): 
-        master_tulos = pd.read_csv(os.path.join(args.outPath, 'master.csv'))
+        master_tulos = pd.read_csv(os.path.join(args.outPath, 'master.csv' ))
         return master_tulos 
     # master_tulos = load_prior()
-    
-    ###frekvenssit    
-    
+
+
+    ### Data intergity check ###
+    if master_tulos['FILTER'].isna().any() == True:  #Tyhjia kenttia. Joku on mennyt vikaan. 
+        print('Filter-kentasssa tyhjia. Jokin mennyt vikaan. Ala kayta tuloksai.')
+
+
+    output_name_freqs = r'frekvenssit.csv'
+    output_name_final = r'Finaalit.csv'
+
+    if args.drop_axiom_bp: #true false 
+        master_tulos = master_tulos[~master_tulos['FILTER'].str.contains('(?i)axiom_bp', na=True)]
+        output_name_freqs = r'frekvenssit_no_ax_bps.csv'
+        output_name_final = r'Finaalit_no_ax_bps.csv'
+
+    output_name_final_vcf = output_name_final.replace('csv', 'vcf')
+
+    ### Frekvenssit ###
     tmp = master_tulos.T
     tmp.columns = tmp.iloc[master_tulos.columns.get_loc('ID')] +'^'+ tmp.iloc[master_tulos.columns.get_loc('FILTER')] 
     tmp = tmp[~tmp.index.isin(['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT'])]
@@ -207,14 +221,13 @@ CR,pos
     foo = freqs.reset_index()
     bar = foo['index'].str.split('^', expand=True).rename(columns={0: 'Ax_code', 1:'filter'})
     out = pd.merge(bar,foo , how='inner', left_index=True, right_index=True).sort_values(['Ax_code','filter'])
-    
-    out.to_csv(os.path.join(args.outPath, 'frekvenssit.csv'), index=False)
+        
+    out.to_csv(os.path.join(args.outPath, output_name_freqs ), index=False)
 
-
-    ### Hienompi haku. 
+    ### Hienompi haku ###
     samalla_koodilla = pd.merge(user_input_DF,master_tulos,  how='inner', right_on =['#CHROM','POS' ], left_on = ['CR', 'pos'] ).drop_duplicates().sort_values(['CR', 'pos'])
     
-    #Puuttuvat positiolla 'off by one' 
+    ### Puuttuvat positiolla 'off by one' ###
     outer_join = user_input_DF.merge(samalla_koodilla, how = 'outer', indicator = True)
     puuttuvat = outer_join[~(outer_join._merge == 'both')].drop('_merge', axis = 1)[['CR', 'pos']]
     slave = master_tulos[~master_tulos['ID'].isin(samalla_koodilla['ID'])]
@@ -222,18 +235,20 @@ CR,pos
     
     plus_1 = pd.merge(puuttuvat,slave,  how='inner',  left_on = ['CR', 'pos'], right_on =['#CHROM','POS_plus_1' ], ).drop_duplicates().sort_values(['CR', 'pos'])
 
-    #Kirjoitetaan CSV datana: 
+    ### Kirjoitetaan CSV datana: ###
     valmis = samalla_koodilla.append(plus_1.drop(columns=['POS_plus_1'] )) 
-    valmis.to_csv(os.path.join(args.outPath, 'Finaalit.csv'), index=False)
+    valmis.to_csv(os.path.join(args.outPath, output_name_final), index=False)
 
-    ###Kirjoitetaan VCF datana: 
+    ### Kirjoitetaan VCF datana ###
     vcf_header = get_vcf_header()
 
     valmis.columns = valmis.columns.str.replace('\n', '')
     valmis = valmis.drop(columns=['CR', 'pos'])
-    with open(os.path.join(args.outPath, 'Finaalit.vcf'), 'w') as vcf:
+    with open(os.path.join(args.outPath, output_name_final_vcf), 'w') as vcf:
         vcf.write(vcf_header)
-    valmis.to_csv(os.path.join(args.outPath, 'Finaalit.vcf'), sep="\t", header=True, mode='a', index=False)
+    valmis.to_csv(os.path.join(args.outPath, output_name_final_vcf), sep="\t", header=True, mode='a', index=False)
+
+    del tmp, foo, bar, outer_join, slave, header, common, puuttuvat
 
 
 def get_vcf_header() -> str:
