@@ -217,7 +217,7 @@ CR,pos
     outer_join = user_input_DF.merge(samalla_koodilla, how = 'outer', indicator = True)
     puuttuvat = outer_join[~(outer_join._merge == 'both')].drop('_merge', axis = 1)[['CR', 'pos']]
     slave = master_tulos[~master_tulos['ID'].isin(samalla_koodilla['ID'])]
-    slave['POS_plus_1'] = slave['POS'] + 1
+    slave.loc[:, 'POS_plus_1'] = slave['POS'] + 1
     
     plus_1 = pd.merge(puuttuvat,slave,  how='inner',  left_on = ['CR', 'pos'], right_on =['#CHROM','POS_plus_1' ], ).drop_duplicates().sort_values(['CR', 'pos'])
 
