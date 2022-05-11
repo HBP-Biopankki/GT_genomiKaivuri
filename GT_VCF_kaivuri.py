@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: HUS45090218
+Version 11052022
 """
 import numpy as np
 import pandas as pd
@@ -19,7 +20,7 @@ def config():
 
     global args
     parser = argparse.ArgumentParser()
-    parser.add_argument("--inPath", required = False, default = r'O:\Raw_genotypes\DF4') #Kansio missa raaka-data on. 
+    parser.add_argument("--inPath", required = False, default = None ) #Kansio missa raaka-data on. r'O:\Raw_genotypes\DF4'
     parser.add_argument("--outPath", required = False, default = None)
     parser.add_argument("--locations", required = False, default = None)
     parser.add_argument("--VCF_file_type", required = False, default = None)
@@ -33,7 +34,6 @@ def config():
     #Defaulta pathi
     if args.outPath is None:
         args.outPath = os.path.join(args.inPath, 'tmp_folder')
-config()
 
 def main(): 
     ###Input metodi TBA os.path.isfie(args.locations)
@@ -90,7 +90,8 @@ CR,pos
 17,43094603
 17,43094794
 17,43095848
-17,43095919'''
+17,43095919
+'''
     
     user_input_DF = pd.read_csv(StringIO(user_input), sep=',')
 
@@ -113,13 +114,13 @@ CR,pos
         all_files = all_files[all_files['file_nimi'].str.contains('vcf.gz', regex=False)]
     elif all_files['file_nimi'].str.contains('vcf').any(): 
         args.VCF_file_type = 'vcf'
-        all_files = all_files[all_files['file_nimi'].str.couser_paikatntains('vcf')]
+        all_files = all_files[all_files['file_nimi'].str.endswith('vcf')]
     else: 
         print('VCF tieostojen tunnistuksessa virhe.')
         sleep(5)
         exit() #
-    
-    ### Suurempi .vcf.gz prosssointi ###
+
+   ### Suurempi .vcf.gz prosssointi ###
     for index, read_file in enumerate(all_files['file_nimi']):     
         print('Working on file ', read_file)
         output = gzip.open(os.path.join(args.outPath, 'small_'+read_file) , 'wb') 
@@ -195,7 +196,7 @@ CR,pos
 
     ### Data intergity check ###
     if master_tulos['FILTER'].isna().any() == True:  #Tyhjia kenttia. Joku on mennyt vikaan. 
-        print('Filter-kentasssa tyhjia. Jokin mennyt vikaan. Ala kayta tuloksai.')
+        print('Filter-kentasssa tyhjia. Jokin mennyt vikaan. Ala kayta tuloksia.')
 
 
     output_name_freqs = r'frekvenssit.csv'
@@ -208,21 +209,6 @@ CR,pos
 
     output_name_final_vcf = output_name_final.replace('csv', 'vcf')
 
-    ### Frekvenssit ###
-    tmp = master_tulos.T
-    tmp.columns = tmp.iloc[master_tulos.columns.get_loc('ID')] +'^'+ tmp.iloc[master_tulos.columns.get_loc('FILTER')] 
-    tmp = tmp[~tmp.index.isin(['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT'])]
-
-    freqs = pd.DataFrame()
-    for col in tmp.columns: 
-        freqs = pd.merge(freqs, tmp[col].value_counts().to_frame(), how='outer', left_index = True, right_index=True)
-
-    freqs = freqs.T
-    foo = freqs.reset_index()
-    bar = foo['index'].str.split('^', expand=True).rename(columns={0: 'Ax_code', 1:'filter'})
-    out = pd.merge(bar,foo , how='inner', left_index=True, right_index=True).sort_values(['Ax_code','filter'])
-        
-    out.to_csv(os.path.join(args.outPath, output_name_freqs ), index=False)
 
     ### Hienompi haku ###
     samalla_koodilla = pd.merge(user_input_DF,master_tulos,  how='inner', right_on =['#CHROM','POS' ], left_on = ['CR', 'pos'] ).drop_duplicates().sort_values(['CR', 'pos'])
@@ -239,6 +225,33 @@ CR,pos
     valmis = samalla_koodilla.append(plus_1.drop(columns=['POS_plus_1'] )) 
     valmis.to_csv(os.path.join(args.outPath, output_name_final), index=False)
 
+### Frekvenssit hienommasta hausta. ### 
+
+    ### Frekvenssit ###
+    tmp = valmis.T
+    tmp.columns = tmp.iloc[valmis.columns.get_loc('ID')] +'^'+ tmp.iloc[valmis.columns.get_loc('FILTER')] 
+    tmp = tmp[~tmp.index.isin(['CR','pos', '#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO', 'FORMAT'])]
+
+    freqs = pd.DataFrame()
+    for col in tmp.columns: 
+        freqs = pd.merge(freqs, tmp[col].value_counts().to_frame(), how='outer', left_index = True, right_index=True)
+
+    freqs = freqs.T
+    foo = freqs.reset_index()
+    bar = foo['index'].str.split('^', expand=True).rename(columns={0: 'Ax_code', 1:'filter'})
+   
+    out = pd.merge(bar,foo , how='inner', left_index=True, right_index=True).sort_values(['Ax_code','filter'])
+    out = pd.merge(master_tulos[['#CHROM', 'POS', 'ID', 'REF', 'ALT']].drop_duplicates(), out, how = 'inner', left_on = 'ID', right_on = 'Ax_code' )
+
+    #Fuzzy joini. DEF FLAG: tee fiksummin
+    hm = pd.merge(user_input_DF, out, how = 'outer', left_on = 'CR', right_on = '#CHROM' )      
+    
+    hm = hm[ 
+       (hm['pos'] == hm['POS'])|
+       (hm['pos'] == hm['POS']+1)
+       ].sort_values(['CR','pos', 'POS']).to_csv(os.path.join(args.outPath, output_name_freqs ), index=False)
+
+############################################
     ### Kirjoitetaan VCF datana ###
     vcf_header = get_vcf_header()
 
